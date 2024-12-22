@@ -40,6 +40,7 @@ type Core struct {
 		tls *tls.Config // immutable after startup
 		//_peers             map[Peer]*linkInfo         // configurable after startup
 		_listeners         map[ListenAddress]struct{} // configurable after startup
+		peerFilter         func(ip net.IP) bool       // immutable after startup
 		nodeinfo           NodeInfo                   // immutable after startup
 		nodeinfoPrivacy    NodeInfoPrivacy            // immutable after startup
 		_allowedPublicKeys map[[32]byte]struct{}      // configurable after startup
@@ -127,7 +128,7 @@ func New(cert *tls.Certificate, logger Logger, opts ...SetupOption) (*Core, erro
 			c.log.Errorf("Invalid listener URI %q specified, ignoring\n", listenaddr)
 			continue
 		}
-		if _, err = c.links.listen(u, ""); err != nil {
+		if _, err = c.links.listen(u, "", false); err != nil {
 			c.log.Errorf("Failed to start listener %q: %s\n", listenaddr, err)
 		}
 	}

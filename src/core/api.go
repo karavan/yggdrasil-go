@@ -30,8 +30,11 @@ type PeerInfo struct {
 	Coords        []uint64
 	Port          uint64
 	Priority      uint8
+	Cost          uint64
 	RXBytes       uint64
 	TXBytes       uint64
+	RXRate        uint64
+	TXRate        uint64
 	Uptime        time.Duration
 	Latency       time.Duration
 }
@@ -86,6 +89,8 @@ func (c *Core) GetPeers() []PeerInfo {
 				peerinfo.Inbound = state.linkType == linkTypeIncoming
 				peerinfo.RXBytes = atomic.LoadUint64(&c.rx)
 				peerinfo.TXBytes = atomic.LoadUint64(&c.tx)
+				peerinfo.RXRate = atomic.LoadUint64(&c.rxrate)
+				peerinfo.TXRate = atomic.LoadUint64(&c.txrate)
 				peerinfo.Uptime = time.Since(c.up)
 			}
 			if p, ok := conns[conn]; ok {
@@ -94,6 +99,7 @@ func (c *Core) GetPeers() []PeerInfo {
 				peerinfo.Port = p.Port
 				peerinfo.Priority = p.Priority
 				peerinfo.Latency = p.Latency
+				peerinfo.Cost = p.Cost
 			}
 			peers = append(peers, peerinfo)
 		}
@@ -148,7 +154,14 @@ func (c *Core) GetSessions() []SessionInfo {
 // parsed from a string of the form e.g. "tcp://a.b.c.d:e". In the case of a
 // link-local address, the interface should be provided as the second argument.
 func (c *Core) Listen(u *url.URL, sintf string) (*Listener, error) {
-	return c.links.listen(u, sintf)
+	return c.links.listen(u, sintf, false)
+}
+
+// ListenLocal starts a listener, like the Listen function, but is used for
+// more trustworthy situations where you want to ignore AllowedPublicKeys, i.e.
+// with multicast listeners.
+func (c *Core) ListenLocal(u *url.URL, sintf string) (*Listener, error) {
+	return c.links.listen(u, sintf, true)
 }
 
 // Address gets the IPv6 address of the Yggdrasil node. This is always a /128

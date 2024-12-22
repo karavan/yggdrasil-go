@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 
+	"suah.dev/protect"
+
 	"github.com/gologme/log"
 	gsyslog "github.com/hashicorp/go-syslog"
 	"github.com/hjson/hjson-go/v4"
@@ -39,6 +41,20 @@ type node struct {
 
 // The main function is responsible for configuring and starting Yggdrasil.
 func main() {
+	// Not all operations are coverable with pledge(2), so immediately
+	// limit file system access with unveil(2), effectively preventing
+	// "proc exec" promises right from the start:
+	//
+	// - read arbitrary config file
+	// - create/write arbitrary log file
+	// - read/write/chmod/remove admin socket, if at all
+	if err := protect.Unveil("/", "rwc"); err != nil {
+		panic(fmt.Sprintf("unveil: / rwc: %v", err))
+	}
+	if err := protect.UnveilBlock(); err != nil {
+		panic(fmt.Sprintf("unveil: %v", err))
+	}
+
 	genconf := flag.Bool("genconf", false, "print a new config to stdout")
 	useconf := flag.Bool("useconf", false, "read HJSON/JSON config from stdin")
 	useconffile := flag.String("useconffile", "", "read HJSON/JSON config from specified file path")
@@ -52,11 +68,12 @@ func main() {
 	getsnet := flag.Bool("subnet", false, "use in combination with either -useconf or -useconffile, outputs your IPv6 subnet")
 	getpkey := flag.Bool("publickey", false, "use in combination with either -useconf or -useconffile, outputs your public key")
 	loglevel := flag.String("loglevel", "info", "loglevel to enable")
+	chuserto := flag.String("user", "", "user (and, optionally, group) to set UID/GID to")
 	flag.Parse()
-	
+
 	done := make(chan struct{})
 	defer close(done)
-	
+
 	// Catch interrupts from the operating system to exit gracefully.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
@@ -190,9 +207,16 @@ func main() {
 
 	// Set up the Yggdrasil node itself.
 	{
+		iprange := net.IPNet{
+			IP:   net.ParseIP("200::"),
+			Mask: net.CIDRMask(7, 128),
+		}
 		options := []core.SetupOption{
 			core.NodeInfo(cfg.NodeInfo),
 			core.NodeInfoPrivacy(cfg.NodeInfoPrivacy),
+			core.PeerFilter(func(ip net.IP) bool {
+				return !iprange.Contains(ip)
+			}),
 		}
 		for _, addr := range cfg.Listen {
 			options = append(options, core.ListenAddress(addr))
@@ -271,7 +295,7 @@ func main() {
 			n.tun.SetupAdminHandlers(n.admin)
 		}
 	}
-	
+
 	//Windows service shutdown
 	minwinsvc.SetOnExit(func() {
 		logger.Infof("Shutting down service ...")
@@ -279,6 +303,29 @@ func main() {
 		// Wait for all parts to shutdown properly
 		<-done
 	})
+
+	// Change user if requested
+	if *chuserto != "" {
+		err = chuser(*chuserto)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	// Promise final modes of operation.  At this point, if at all:
+	// - raw socket is created/open
+	// - admin socket is created/open
+	// - privileges are dropped to non-root user
+	//
+	// Peers, InterfacePeers, Listen can be UNIX sockets;
+	// Go's net.Listen.Close() deletes files on shutdown.
+	promises := []string{"stdio", "cpath", "inet", "unix", "dns"}
+	if len(cfg.MulticastInterfaces) > 0 {
+		promises = append(promises, "mcast")
+	}
+	if err := protect.Pledge(strings.Join(promises, " ")); err != nil {
+		panic(fmt.Sprintf("pledge: %v: %v", promises, err))
+	}
 
 	// Block until we are told to shut down.
 	<-ctx.Done()

@@ -26,6 +26,86 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - in case of vulnerabilities.
 -->
 
+## [0.5.12] - 2024-12-18
+
+* Go 1.22 is now required to build Yggdrasil
+
+### Changed
+
+* The `latency_ms` field in the admin socket `getPeers` response has been renamed to `latency`
+
+### Fixed
+
+* A timing regression which causes a higher level of idle protocol traffic on each peering has been fixed
+* The `-user` flag now correctly detects an empty user/group specification
+
+## [0.5.11] - 2024-12-12
+
+### Added
+
+* Support for `unveil` and `pledge` on OpenBSD
+
+### Changed
+
+* The parent selection algorithm now only chooses a new parent if there is a larger cost benefit to doing so, which should help to stabilise the tree
+* The bloom filters are now repropagated periodically, to avoid nodes getting stuck with bad state
+
+### Fixed
+
+* A memory leak caused by missed cleanup of the peer response map has been fixed
+* Other bug fixes with bloom filter propagation for off-tree filters and zero vs one bits
+* TLS-based peering connections now support TLS 1.2 again
+
+## [0.5.10] - 2024-11-24
+
+### Added
+
+* The `getPeers` admin endpoint will now report the current transmit/receive rate for each given peer
+* The `getMulticastInterfaces` admin endpoint now reports much more useful information about each interface, rather than just a list of interface names
+
+### Changed
+
+* Minor tweaks to the routing algorithm:
+  * The next-hop selection will now prefer shorter paths when the costed distance is otherwise equal, tiebreaking on peering uptime to fall back to more stable paths
+  * Link cost calculations have been smoothed out, making the costs less sensitive to sudden spikes in latency
+* Reusable name lookup and peer connection logic across different peering types for more consistent behaviour
+* Some comments in the configuration file have been revised for clarity
+* Upgrade dependencies
+
+### Fixed
+
+* Nodes with `IfName` set to `none` will now correctly respond to debug RPC requests
+* The admin socket will now be created reliably before dropping privileges with `-user`
+* Clear supplementary groups when providing a group ID as well as a user ID to `-user`
+* SOCKS and WebSocket peerings should now use the correct source interface when specified in `InterfacePeers`
+* `Peers` and `InterfacePeers` addresses that are obviously invalid (such as unspecified or multicast addresses) will now be correctly ignored
+* Listeners should now shut down correctly, which should resolve issues where multicast listeners for specific interfaces would not come back up or would log errors
+
+## [0.5.9] - 2024-10-19
+
+### Added
+
+* New command line option `-user` for changing the process UID/GID
+
+### Changed
+
+* The routing algorithm has been updated with RTT-aware link costing, which should prefer lower latency links over higher latency links where possible
+  * The calculated cost is an average of the link RTT, but newly established links are costed higher to begin with, such that unstable peerings can be avoided
+  * Link costs are only used where multiple next-hops are available and will be ignored if there is only one loop-free path to the destination
+  * This is protocol-compatible with existing v0.5.x nodes but will have the best results when peering with nodes that are also running the latest version
+  * The `getPeers` endpoint will now report the calculated link cost for each given peer
+* Upgrade dependencies
+
+### Fixed
+
+* Multicast discovery should now work again when building Yggdrasil as an Android framework
+* Multicast discovery will now correctly ignore interfaces that are not marked as running
+* Ephemeral links, such as those added by multicast, will no longer try to reconnect in a fast loop, fixing a high CPU issue
+* The TUN interface will no longer stop working when hitting a segment read error from vectorised reads
+* The `AllowedPublicKeys` option will once again no longer apply to multicast peerings, as was originally intended
+* A potential panic when shutting down peering links has been fixed
+* A redundant system call for setting MTU on OpenBSD has been removed
+
 ## [0.5.8] - 2024-08-12
 
 ### Fixed

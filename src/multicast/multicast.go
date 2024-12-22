@@ -156,7 +156,13 @@ func (m *Multicast) _updateInterfaces() {
 			delete(interfaces, name)
 			continue
 		}
-		info.addrs = addrs
+		for _, addr := range addrs {
+			addrIP, _, err := net.ParseCIDR(addr.String())
+			if err != nil || addrIP.To4() != nil || !addrIP.IsLinkLocalUnicast() {
+				continue
+			}
+			info.addrs = append(info.addrs, addr)
+		}
 		interfaces[name] = info
 		m.log.Debugf("Discovered addresses for interface %s: %s", name, addrs)
 	}
@@ -190,6 +196,8 @@ func (m *Multicast) _getAllowedInterfaces() map[string]*interfaceInfo {
 		switch {
 		case iface.Flags&net.FlagUp == 0:
 			continue // Ignore interfaces that are down
+		case iface.Flags&net.FlagRunning == 0:
+			continue // Ignore interfaces that are not running
 		case iface.Flags&net.FlagMulticast == 0:
 			continue // Ignore non-multicast interfaces
 		case iface.Flags&net.FlagPointToPoint != 0:
@@ -297,13 +305,9 @@ func (m *Multicast) _announce() {
 	for _, info := range m._interfaces {
 		iface := info.iface
 		for _, addr := range info.addrs {
-			addrIP, _, _ := net.ParseCIDR(addr.String())
-			// Ignore IPv4 addresses
-			if addrIP.To4() != nil {
-				continue
-			}
-			// Ignore non-link-local addresses
-			if !addrIP.IsLinkLocalUnicast() {
+			addrIP, _, err := net.ParseCIDR(addr.String())
+			// Ignore IPv4 addresses or non-link-local addresses
+			if err != nil || addrIP.To4() != nil || !addrIP.IsLinkLocalUnicast() {
 				continue
 			}
 			if info.listen {
@@ -325,7 +329,7 @@ func (m *Multicast) _announce() {
 					Host:     net.JoinHostPort(addrIP.String(), fmt.Sprintf("%d", info.port)),
 					RawQuery: v.Encode(),
 				}
-				if li, err := m.core.Listen(u, iface.Name); err == nil {
+				if li, err := m.core.ListenLocal(u, iface.Name); err == nil {
 					m.log.Debugln("Started multicasting on", iface.Name)
 					// Store the listener so that we can stop it later if needed
 					linfo = &listenerInfo{listener: li, time: time.Now(), port: info.port}
